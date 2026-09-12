@@ -9,7 +9,7 @@ function env(name: string): string {
 export const config = {
   token: env("DISCORD_BOT_TOKEN"),
   channelId: process.env.DISCORD_CHANNEL_ID?.trim() || undefined,
-  dbPath: resolve(process.env.DB_PATH || "./data/avatar.db"),
+  dbPath: resolve(process.env.DB_PATH || "./data/img.db"),
   avatarDir: resolve(process.env.AVATAR_DIR || "./data/avatars"),
   attachmentDir: resolve(
     process.env.ATTACHMENT_DIR || "./data/attachments",

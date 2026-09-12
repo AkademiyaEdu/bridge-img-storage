@@ -27,19 +27,29 @@ export class AttachmentStore {
     private readonly publicBaseUrl: string,
   ) {}
 
-  save(attachment: DiscordAttachment): Promise<string> {
-    const source = this.validateSource(attachment);
-    const current = this.pending.get(attachment.id);
+  save(attachments: readonly DiscordAttachment[]): Promise<string[]> {
+    const validated = attachments.map((attachment) => ({
+      id: attachment.id,
+      source: this.validateSource(attachment),
+    }));
+
+    return Promise.all(
+      validated.map(({ id, source }) => this.saveOne(id, source)),
+    );
+  }
+
+  private saveOne(id: string, source: URL): Promise<string> {
+    const current = this.pending.get(id);
 
     if (current) {
       return current;
     }
 
-    const task = this.store(attachment.id, source).finally(() => {
-      this.pending.delete(attachment.id);
+    const task = this.store(id, source).finally(() => {
+      this.pending.delete(id);
     });
 
-    this.pending.set(attachment.id, task);
+    this.pending.set(id, task);
     return task;
   }
 

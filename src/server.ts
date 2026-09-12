@@ -4,7 +4,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import type { AttachmentStore } from "./attachment.js";
+import type { AttachmentStore, DiscordAttachment } from "./attachment.js";
 
 const MAX_BODY_SIZE = 64 * 1024;
 
@@ -35,6 +35,30 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+function parseAttachments(value: unknown): DiscordAttachment[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Expected an attachment array");
+  }
+
+  return value.map((item) => {
+    if (!item || typeof item !== "object") {
+      throw new Error("Invalid attachment");
+    }
+
+    const { id, url } = item as { id?: unknown; url?: unknown };
+
+    if (
+      typeof id !== "string" ||
+      !/^\d+$/.test(id) ||
+      typeof url !== "string"
+    ) {
+      throw new Error("Invalid attachment");
+    }
+
+    return { id, url };
+  });
+}
+
 function send(
   res: ServerResponse,
   status: number,
@@ -55,7 +79,10 @@ export function createStorageServer(
       return;
     }
 
-    if (req.method !== "POST" || req.url !== "/discord-attachments") {
+    if (
+      req.method !== "POST" ||
+      req.url !== "/api/discord/attachments"
+    ) {
       send(res, 404, "Not Found");
       return;
     }
@@ -67,41 +94,26 @@ export function createStorageServer(
       return;
     }
 
-    let body: { id?: unknown; url?: unknown };
+    let body: DiscordAttachment[];
 
     try {
-      const parsed = await readJson(req);
-
-      if (!parsed || typeof parsed !== "object") {
-        throw new Error("Invalid JSON object");
-      }
-
-      body = parsed as typeof body;
+      body = parseAttachments(await readJson(req));
     } catch {
       send(res, 400, "Invalid request");
       return;
     }
 
-    if (
-      typeof body.id !== "string" ||
-      !/^\d+$/.test(body.id) ||
-      typeof body.url !== "string"
-    ) {
-      send(res, 400, "Invalid request");
-      return;
-    }
-
     try {
-      const url = await attachments.save({
-        id: body.id,
-        url: body.url,
-      });
+      const urls = await attachments.save(body);
 
-      send(res, 200, JSON.stringify({ url }), {
+      send(res, 200, JSON.stringify(urls), {
         "content-type": "application/json; charset=utf-8",
       });
     } catch (error) {
-      console.error(`[attachment] ${body.id}:`, error);
+      console.error(
+        `[attachment] ${body.map((attachment) => attachment.id).join(",")}:`,
+        error,
+      );
       send(res, 502, "Attachment storage failed");
     }
   });

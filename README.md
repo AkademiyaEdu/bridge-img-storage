@@ -17,7 +17,7 @@ cp .env.example .env
 ```dotenv
 DISCORD_BOT_TOKEN=你的BotToken
 DISCORD_CHANNEL_ID=需要监听头像的频道ID
-DB_PATH=./data/avatar.db
+DB_PATH=./data/img.db
 AVATAR_DIR=./data/avatars
 ATTACHMENT_DIR=./data/attachments
 PUBLIC_BASE_URL=https://discord.nahida.im
@@ -26,7 +26,7 @@ HTTP_HOST=127.0.0.1
 HTTP_PORT=8787
 ```
 
-`DISCORD_CHANNEL_ID` 留空时会监听 Bot 可见的所有服务器频道消息。`PUBLIC_BASE_URL` 是静态图片对 QQ 可见的公网域名。
+`DISCORD_CHANNEL_ID` 留空时会监听 Bot 可见的所有服务器频道消息。`PUBLIC_BASE_URL` 是静态图片对 QQ 可见的公网域名。SQLite 默认使用 `./data/img.db`。
 
 ```bash
 pnpm typecheck
@@ -36,20 +36,32 @@ pnpm dev
 
 ## Discord attachment API
 
-主桥通过以下接口要求本进程保存图片：
+主桥通过以下接口要求本进程保存一组图片：
 
 ```http
-POST /discord-attachments
+POST /api/discord/attachments
 Authorization: Bearer <STORAGE_API_TOKEN>
 Content-Type: application/json
 
-{"id":"1548211192839929936","url":"https://cdn.discordapp.com/attachments/..."}
+[
+  {
+    "id": "1548211192839929936",
+    "url": "https://cdn.discordapp.com/attachments/..."
+  },
+  {
+    "id": "1548211193062940723",
+    "url": "https://cdn.discordapp.com/attachments/..."
+  }
+]
 ```
 
-成功后返回：
+本进程会并发下载数组中的图片，并按请求顺序返回永久 URL：
 
 ```json
-{"url":"https://discord.nahida.im/attachments/1548211192839929936.png"}
+[
+  "https://discord.nahida.im/attachments/1548211192839929936.png",
+  "https://discord.nahida.im/attachments/1548211193062940723.png"
+]
 ```
 
 只接受 `https://cdn.discordapp.com/attachments/...`，并校验 URL 中的 attachment ID 与请求 ID 一致。文件已存在时直接返回，不重复下载。同一个 attachment ID 的并发请求会合并。
