@@ -2,9 +2,41 @@
 
 QQ/Discord 桥的独立图片存储进程。目前负责两件事：监听 Discord 用户头像并落盘，以及接收主桥发来的 Discord attachment URL、下载图片并永久保存。
 
+## Nix package
+
+Flake 同时提供生产 package 和开发环境。公开仓库可以直接构建或运行：
+
+```bash
+nix build github:AkademiyaEdu/bridge-img-storage
+./result/bin/bridge-img-storage
+```
+
+也可以直接：
+
+```bash
+nix run github:AkademiyaEdu/bridge-img-storage
+```
+
+Package 使用 Node.js 26 和 pnpm 10 构建 TypeScript，产物中只保留运行时依赖，并提供 `bin/bridge-img-storage` 启动入口。程序数据仍应放在 Nix store 之外，例如 `/var/lib/bridge-img-storage`。
+
+如果要从另一个 flake 引用：
+
+```nix
+inputs.bridge-img-storage = {
+  url = "github:AkademiyaEdu/bridge-img-storage";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+对应 package 为：
+
+```nix
+inputs.bridge-img-storage.packages.${pkgs.system}.default
+```
+
 ## 开发
 
-Nix flake 只提供开发环境，直接使用 nixpkgs 的 Node.js、pnpm、git 和 jq。
+开发环境直接使用 nixpkgs 的 Node.js 26、pnpm 10、git 和 jq。
 
 ```bash
 nix develop
