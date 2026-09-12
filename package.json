@@ -1,5 +1,5 @@
 {
-  "name": "discord-avatar-sync",
+  "name": "bridge-img-storage",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -22,5 +22,5 @@
     "tsx": "^4.23.0",
     "typescript": "^5.9.3"
   },
-  "description": "Discord avatar synchronization worker"
+  "description": "Image storage worker for the QQ/Discord bridge"
 }
