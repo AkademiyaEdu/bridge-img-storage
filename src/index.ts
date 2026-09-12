@@ -3,11 +3,21 @@ import { mkdir } from "node:fs/promises";
 import { config } from "./config.js";
 import { AvatarDB } from "./db.js";
 import { AvatarStore } from "./avatar.js";
+import { AttachmentStore } from "./attachment.js";
+import { createStorageServer } from "./server.js";
 
-await mkdir(config.avatarDir, { recursive: true });
+await Promise.all([
+  mkdir(config.avatarDir, { recursive: true }),
+  mkdir(config.attachmentDir, { recursive: true }),
+]);
 
 const db = new AvatarDB(config.dbPath);
 const avatars = new AvatarStore(config.avatarDir, db);
+const attachments = new AttachmentStore(
+  config.attachmentDir,
+  config.publicBaseUrl,
+);
+const server = createStorageServer(attachments, config.apiToken);
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
@@ -37,9 +47,14 @@ client.once(Events.ClientReady, ready => {
   console.log(`[discord] ${ready.user.tag}`);
 });
 
+server.listen(config.http.port, config.http.host, () => {
+  console.log(`[http] http://${config.http.host}:${config.http.port}`);
+});
+
 await client.login(config.token);
 
 function stop(): void {
+  server.close();
   client.destroy();
   db.close();
 }

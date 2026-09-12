@@ -11,4 +11,13 @@ export const config = {
   channelId: process.env.DISCORD_CHANNEL_ID?.trim() || undefined,
   dbPath: resolve(process.env.DB_PATH || "./data/avatar.db"),
   avatarDir: resolve(process.env.AVATAR_DIR || "./data/avatars"),
+  attachmentDir: resolve(
+    process.env.ATTACHMENT_DIR || "./data/attachments",
+  ),
+  publicBaseUrl: env("PUBLIC_BASE_URL"),
+  apiToken: env("STORAGE_API_TOKEN"),
+  http: {
+    host: process.env.HTTP_HOST?.trim() || "127.0.0.1",
+    port: Number(process.env.HTTP_PORT || "8787"),
+  },
 };
