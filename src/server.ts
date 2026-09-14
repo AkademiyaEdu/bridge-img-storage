@@ -4,7 +4,11 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import type { AttachmentStore, DiscordAttachment } from "./attachment.js";
+import type {
+  AttachmentStore,
+  DiscordAttachment,
+  QQAttachment,
+} from "./attachment.js";
 
 const MAX_BODY_SIZE = 64 * 1024;
 
@@ -35,7 +39,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-function parseAttachments(value: unknown): DiscordAttachment[] {
+function parseDiscordAttachments(value: unknown): DiscordAttachment[] {
   if (!Array.isArray(value)) {
     throw new Error("Expected an attachment array");
   }
@@ -50,6 +54,30 @@ function parseAttachments(value: unknown): DiscordAttachment[] {
     if (
       typeof id !== "string" ||
       !/^\d+$/.test(id) ||
+      typeof url !== "string"
+    ) {
+      throw new Error("Invalid attachment");
+    }
+
+    return { id, url };
+  });
+}
+
+function parseQQAttachments(value: unknown): QQAttachment[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Expected an attachment array");
+  }
+
+  return value.map((item) => {
+    if (!item || typeof item !== "object") {
+      throw new Error("Invalid attachment");
+    }
+
+    const { id, url } = item as { id?: unknown; url?: unknown };
+
+    if (
+      typeof id !== "string" ||
+      id.length === 0 ||
       typeof url !== "string"
     ) {
       throw new Error("Invalid attachment");
@@ -79,10 +107,14 @@ export function createStorageServer(
       return;
     }
 
-    if (
-      req.method !== "POST" ||
-      req.url !== "/api/discord/attachments"
-    ) {
+    const source =
+      req.method === "POST" && req.url === "/api/discord/attachments"
+        ? "discord"
+        : req.method === "POST" && req.url === "/api/qq/attachments"
+          ? "qq"
+          : undefined;
+
+    if (!source) {
       send(res, 404, "Not Found");
       return;
     }
@@ -94,24 +126,60 @@ export function createStorageServer(
       return;
     }
 
-    let body: DiscordAttachment[];
+    let value: unknown;
 
     try {
-      body = parseAttachments(await readJson(req));
+      value = await readJson(req);
+    } catch {
+      send(res, 400, "Invalid request");
+      return;
+    }
+
+    if (source === "discord") {
+      let body: DiscordAttachment[];
+
+      try {
+        body = parseDiscordAttachments(value);
+      } catch {
+        send(res, 400, "Invalid request");
+        return;
+      }
+
+      try {
+        const urls = await attachments.saveDiscord(body);
+
+        send(res, 200, JSON.stringify(urls), {
+          "content-type": "application/json; charset=utf-8",
+        });
+      } catch (error) {
+        console.error(
+          `[attachment] Discord ${body.map((attachment) => attachment.id).join(",")}:`,
+          error,
+        );
+        send(res, 502, "Attachment storage failed");
+      }
+
+      return;
+    }
+
+    let body: QQAttachment[];
+
+    try {
+      body = parseQQAttachments(value);
     } catch {
       send(res, 400, "Invalid request");
       return;
     }
 
     try {
-      const urls = await attachments.save(body);
+      const urls = await attachments.saveQQ(body);
 
       send(res, 200, JSON.stringify(urls), {
         "content-type": "application/json; charset=utf-8",
       });
     } catch (error) {
       console.error(
-        `[attachment] ${body.map((attachment) => attachment.id).join(",")}:`,
+        `[attachment] QQ ${body.map((attachment) => attachment.id).join(",")}:`,
         error,
       );
       send(res, 502, "Attachment storage failed");
