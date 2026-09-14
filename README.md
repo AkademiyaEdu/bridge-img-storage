@@ -1,6 +1,8 @@
 # Bridge Image Storage
 
-QQ/Discord 桥的独立图片存储进程。目前负责两件事：监听 Discord 用户头像并落盘，以及接收主桥发来的 Discord attachment URL、下载图片并永久保存。
+QQ/Discord 桥的独立图片存储进程。目前负责监听 Discord 用户头像，以及保存 Discord / QQ 两侧需要长期公网访问的图片。
+
+Discord attachment 和 QQ 图片共用 `ATTACHMENT_DIR`。下载完成后按内容计算 SHA-256，并保存为 `{sha256}.{ext}`，因此两侧字节完全相同的图片只会存一份。
 
 ## Nix package
 
@@ -58,7 +60,7 @@ HTTP_HOST=127.0.0.1
 HTTP_PORT=8787
 ```
 
-`DISCORD_CHANNEL_ID` 留空时会监听 Bot 可见的所有服务器频道消息。`PUBLIC_BASE_URL` 是静态图片对 QQ 可见的公网域名。SQLite 默认使用 `./data/img.db`。
+`DISCORD_CHANNEL_ID` 留空时会监听 Bot 可见的所有服务器频道消息。`PUBLIC_BASE_URL` 是静态图片的公网域名。SQLite 默认使用 `./data/img.db`。如果使用 rclone mount / VFS，把 `ATTACHMENT_DIR` 指向挂载目录即可；SQLite 和头像目录仍建议保留在本地磁盘。
 
 ```bash
 pnpm typecheck
@@ -68,7 +70,7 @@ pnpm dev
 
 ## Discord attachment API
 
-主桥通过以下接口要求本进程保存一组图片：
+主桥通过以下接口要求本进程保存一组 Discord 图片：
 
 ```http
 POST /api/discord/attachments
@@ -79,26 +81,42 @@ Content-Type: application/json
   {
     "id": "1548211192839929936",
     "url": "https://cdn.discordapp.com/attachments/..."
-  },
-  {
-    "id": "1548211193062940723",
-    "url": "https://cdn.discordapp.com/attachments/..."
   }
 ]
 ```
 
-本进程会并发下载数组中的图片，并按请求顺序返回永久 URL：
+只接受 `https://cdn.discordapp.com/attachments/...`，并校验 URL 中的 attachment ID 与请求 ID 一致。
 
-```json
+## QQ attachment API
+
+QQ → Discord 需要外链存储的图片通过以下接口保存：
+
+```http
+POST /api/qq/attachments
+Authorization: Bearer <STORAGE_API_TOKEN>
+Content-Type: application/json
+
 [
-  "https://discord.nahida.im/attachments/1548211192839929936.png",
-  "https://discord.nahida.im/attachments/1548211193062940723.png"
+  {
+    "id": "<QQ fileid>",
+    "url": "https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=...&rkey=..."
+  }
 ]
 ```
 
-只接受 `https://cdn.discordapp.com/attachments/...`，并校验 URL 中的 attachment ID 与请求 ID 一致。文件已存在时直接返回，不重复下载。同一个 attachment ID 的并发请求会合并。
+只接受 `https://multimedia.nt.qq.com.cn/download`，并校验查询参数中的 `fileid` 与请求 ID 一致。QQ 临时 URL 会由本进程立即下载。
 
-`GET /healthz` 不需要鉴权。写接口使用 Bearer Token；公网测试时应由 Nginx/Caddy 提供 HTTPS，Node 继续监听 `127.0.0.1`。
+两个接口都会并发下载数组中的图片，并按请求顺序返回永久 URL：
+
+```json
+[
+  "https://discord.nahida.im/attachments/3c9f...f12a.png"
+]
+```
+
+文件名使用下载内容的 SHA-256。Discord 和 QQ 共用同一个目录及命名空间，因此相同内容会自动去重；并发写入同一内容也会合并到同一个最终文件。所有图片都通过 `/attachments/` 暴露。
+
+`GET /healthz` 不需要鉴权。写接口使用 Bearer Token；公网部署时应由 Nginx/Caddy 提供 HTTPS，Node 继续监听 `127.0.0.1`。
 
 ## 静态文件
 
@@ -111,9 +129,9 @@ location /avatars/ {
 }
 
 location /attachments/ {
-    alias /var/lib/bridge-img-storage/attachments/;
+    alias /mnt/gdrive/bridge-img-storage/attachments/;
     add_header Cache-Control "public, max-age=31536000, immutable";
 }
 ```
 
-头像文件名是 `{userid}.webp`，会被覆盖，因此不能长期 immutable。Discord attachment ID 对应内容不变，可以长期缓存。
+头像文件名是 `{userid}.webp`，会被覆盖，因此不能长期 immutable。图片 URL 由内容 SHA-256 决定，不会变化，可以长期缓存。
