@@ -1,6 +1,9 @@
-import { randomUUID } from "node:crypto";
-import { access, mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { access, mkdir, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 const EXTENSION_BY_CONTENT_TYPE = new Map([
   ["image/png", "png"],
@@ -19,41 +22,71 @@ export interface DiscordAttachment {
   url: string;
 }
 
+export interface QQAttachment {
+  id: string;
+  url: string;
+}
+
+type ValidatedAttachment = {
+  key: string;
+  id: string;
+  source: URL;
+  sourceName: "Discord" | "QQ";
+};
+
 export class AttachmentStore {
-  private readonly pending = new Map<string, Promise<string>>();
+  private readonly pendingSources = new Map<string, Promise<string>>();
+  private readonly pendingContents = new Map<string, Promise<string>>();
 
   constructor(
     private readonly dir: string,
     private readonly publicBaseUrl: string,
   ) {}
 
-  save(attachments: readonly DiscordAttachment[]): Promise<string[]> {
-    const validated = attachments.map((attachment) => ({
-      id: attachment.id,
-      source: this.validateSource(attachment),
-    }));
-
-    return Promise.all(
-      validated.map(({ id, source }) => this.saveOne(id, source)),
+  saveDiscord(attachments: readonly DiscordAttachment[]): Promise<string[]> {
+    return this.save(
+      attachments.map((attachment) => ({
+        key: `discord:${attachment.id}`,
+        id: attachment.id,
+        source: this.validateDiscordSource(attachment),
+        sourceName: "Discord" as const,
+      })),
     );
   }
 
-  private saveOne(id: string, source: URL): Promise<string> {
-    const current = this.pending.get(id);
+  saveQQ(attachments: readonly QQAttachment[]): Promise<string[]> {
+    return this.save(
+      attachments.map((attachment) => ({
+        key: `qq:${attachment.id}`,
+        id: attachment.id,
+        source: this.validateQQSource(attachment),
+        sourceName: "QQ" as const,
+      })),
+    );
+  }
+
+  private save(attachments: readonly ValidatedAttachment[]): Promise<string[]> {
+    return Promise.all(
+      attachments.map((attachment) => this.saveOne(attachment)),
+    );
+  }
+
+  private saveOne(attachment: ValidatedAttachment): Promise<string> {
+    const current = this.pendingSources.get(attachment.key);
 
     if (current) {
       return current;
     }
 
-    const task = this.store(id, source).finally(() => {
-      this.pending.delete(id);
+    const task = this.store(attachment).finally(() => {
+      this.pendingSources.delete(attachment.key);
     });
 
-    this.pending.set(id, task);
+    this.pendingSources.set(attachment.key, task);
     return task;
   }
 
-  private validateSource(attachment: DiscordAttachment): URL {
+  private validateDiscordSource(attachment: DiscordAttachment): URL {
     if (!/^\d+$/.test(attachment.id)) {
       throw new Error("Invalid Discord attachment id");
     }
@@ -78,21 +111,42 @@ export class AttachmentStore {
     return source;
   }
 
-  private async store(id: string, source: URL): Promise<string> {
-    const existing = await this.findExisting(id);
-    if (existing) {
-      return this.publicUrl(existing);
+  private validateQQSource(attachment: QQAttachment): URL {
+    if (!attachment.id) {
+      throw new Error("Invalid QQ attachment id");
     }
 
-    const response = await fetch(source, {
+    const source = new URL(attachment.url);
+
+    if (
+      source.protocol !== "https:" ||
+      source.hostname !== "multimedia.nt.qq.com.cn" ||
+      source.pathname !== "/download"
+    ) {
+      throw new Error("Unsupported QQ attachment URL");
+    }
+
+    if (source.searchParams.get("fileid") !== attachment.id) {
+      throw new Error("QQ attachment id does not match URL");
+    }
+
+    return source;
+  }
+
+  private async store(attachment: ValidatedAttachment): Promise<string> {
+    const response = await fetch(attachment.source, {
       redirect: "error",
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!response.ok) {
       throw new Error(
-        `Discord attachment download failed: HTTP ${response.status}`,
+        `${attachment.sourceName} attachment download failed: HTTP ${response.status}`,
       );
+    }
+
+    if (!response.body) {
+      throw new Error(`${attachment.sourceName} attachment response is empty`);
     }
 
     const contentType = response.headers
@@ -108,28 +162,73 @@ export class AttachmentStore {
       throw new Error(`Unsupported image type: ${contentType ?? "unknown"}`);
     }
 
-    const image = Buffer.from(await response.arrayBuffer());
-    const filename = `${id}.${extension}`;
-    const path = join(this.dir, filename);
-
     await mkdir(this.dir, { recursive: true });
 
-    const temporary = join(this.dir, `${id}.${randomUUID()}.tmp`);
+    const temporary = join(this.dir, `${randomUUID()}.tmp`);
+    const hash = createHash("sha256");
+    const hasher = new Transform({
+      transform(chunk, _encoding, callback) {
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
 
     try {
-      await writeFile(temporary, image);
-      await rename(temporary, path);
+      await pipeline(
+        Readable.fromWeb(response.body),
+        hasher,
+        createWriteStream(temporary, { flags: "wx" }),
+      );
+
+      const digest = hash.digest("hex");
+      const url = await this.storeContent(temporary, digest, extension);
+
+      console.log(
+        `[attachment] ${attachment.sourceName} ${attachment.id} -> ${digest}`,
+      );
+      return url;
     } finally {
       await unlink(temporary).catch(() => {});
     }
+  }
 
-    console.log(`[attachment] ${id} stored`);
+  private storeContent(
+    temporary: string,
+    digest: string,
+    extension: string,
+  ): Promise<string> {
+    const current = this.pendingContents.get(digest);
+
+    if (current) {
+      return current;
+    }
+
+    const task = this.commitContent(temporary, digest, extension).finally(() => {
+      this.pendingContents.delete(digest);
+    });
+
+    this.pendingContents.set(digest, task);
+    return task;
+  }
+
+  private async commitContent(
+    temporary: string,
+    digest: string,
+    extension: string,
+  ): Promise<string> {
+    const existing = await this.findExisting(digest);
+    if (existing) {
+      return this.publicUrl(existing);
+    }
+
+    const filename = `${digest}.${extension}`;
+    await rename(temporary, join(this.dir, filename));
     return this.publicUrl(filename);
   }
 
-  private async findExisting(id: string): Promise<string | undefined> {
+  private async findExisting(digest: string): Promise<string | undefined> {
     for (const extension of IMAGE_EXTENSIONS) {
-      const filename = `${id}.${extension}`;
+      const filename = `${digest}.${extension}`;
 
       try {
         await access(join(this.dir, filename));
