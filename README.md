@@ -68,53 +68,40 @@ pnpm test
 pnpm dev
 ```
 
-## Discord attachment API
+## Image storage API
 
-主桥通过以下接口要求本进程保存一组 Discord 图片：
+Discord 和 QQ 图片统一通过同一个接口保存：
 
 ```http
-POST /api/discord/attachments
+POST /api/images
 Authorization: Bearer <STORAGE_API_TOKEN>
 Content-Type: application/json
 
 [
-  {
-    "id": "1548211192839929936",
-    "url": "https://cdn.discordapp.com/attachments/..."
-  }
+  "https://cdn.discordapp.com/attachments/123/456/image.png?...",
+  "https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=...&rkey=..."
 ]
 ```
 
-只接受 `https://cdn.discordapp.com/attachments/...`，并校验 URL 中的 attachment ID 与请求 ID 一致。
+请求体是图片临时 URL 数组，不需要额外传 attachment ID 或 QQ fileid。本进程会从 URL 本身解析来源标识，并立即并发下载。
 
-## QQ attachment API
+目前只接受两类来源：
 
-QQ → Discord 需要外链存储的图片通过以下接口保存：
+- `https://cdn.discordapp.com/attachments/...`
+- `https://multimedia.nt.qq.com.cn/download?...&fileid=...`
 
-```http
-POST /api/qq/attachments
-Authorization: Bearer <STORAGE_API_TOKEN>
-Content-Type: application/json
+其他 URL 会被拒绝。Discord URL 会解析路径中的 attachment ID，QQ URL 会解析查询参数中的 `fileid`，两者只用于下载期间的并发去重；永久文件名始终由下载内容的 SHA-256 决定。
 
-[
-  {
-    "id": "<QQ fileid>",
-    "url": "https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=...&rkey=..."
-  }
-]
-```
-
-只接受 `https://multimedia.nt.qq.com.cn/download`，并校验查询参数中的 `fileid` 与请求 ID 一致。QQ 临时 URL 会由本进程立即下载。
-
-两个接口都会并发下载数组中的图片，并按请求顺序返回永久 URL：
+接口按请求顺序返回永久 URL：
 
 ```json
 [
-  "https://discord.nahida.im/attachments/3c9f...f12a.png"
+  "https://discord.nahida.im/attachments/3c9f...f12a.png",
+  "https://discord.nahida.im/attachments/7d2a...91be.webp"
 ]
 ```
 
-文件名使用下载内容的 SHA-256。Discord 和 QQ 共用同一个目录及命名空间，因此相同内容会自动去重；并发写入同一内容也会合并到同一个最终文件。所有图片都通过 `/attachments/` 暴露。
+Discord 和 QQ 共用同一个目录及命名空间，因此相同内容会自动去重；并发写入同一内容也会合并到同一个最终文件。所有图片都通过 `/attachments/` 暴露。
 
 `GET /healthz` 不需要鉴权。写接口使用 Bearer Token；公网部署时应由 Nginx/Caddy 提供 HTTPS，Node 继续监听 `127.0.0.1`。
 
