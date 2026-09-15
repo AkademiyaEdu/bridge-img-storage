@@ -11,9 +11,7 @@ export const config = {
   channelId: process.env.DISCORD_CHANNEL_ID?.trim() || undefined,
   dbPath: resolve(process.env.DB_PATH || "./data/img.db"),
   avatarDir: resolve(process.env.AVATAR_DIR || "./data/avatars"),
-  attachmentDir: resolve(
-    process.env.ATTACHMENT_DIR || "./data/attachments",
-  ),
+  imageDir: resolve(process.env.IMAGE_DIR || "./data/images"),
   publicBaseUrl: env("PUBLIC_BASE_URL"),
   apiToken: env("STORAGE_API_TOKEN"),
   http: {
