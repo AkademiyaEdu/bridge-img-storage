@@ -15,7 +15,7 @@
         let
           package = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
             pname = "bridge-img-storage";
-            version = "1.0.0";
+            version = "1.0.1";
             src = self;
 
             pnpmDeps = pkgs.fetchPnpmDeps {
