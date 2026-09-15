@@ -23,7 +23,7 @@ type ValidatedImage = {
   sourceName: "Discord" | "QQ";
 };
 
-export class AttachmentStore {
+export class ImageStore {
   private readonly pendingSources = new Map<string, Promise<string>>();
   private readonly pendingContents = new Map<string, Promise<string>>();
 
@@ -60,9 +60,7 @@ export class AttachmentStore {
       source.protocol === "https:" &&
       source.hostname === "cdn.discordapp.com"
     ) {
-      const match = source.pathname.match(
-        /^\/attachments\/\d+\/(\d+)\/[^/]+$/,
-      );
+      const match = source.pathname.match(/^\/attachments\/\d+\/(\d+)\/[^/]+$/);
 
       if (!match) {
         throw new Error("Unsupported Discord attachment URL");
@@ -138,7 +136,7 @@ export class AttachmentStore {
 
     try {
       await pipeline(
-        Readable.fromWeb(response.body),
+        Readable.fromWeb(response.body as any),
         hasher,
         createWriteStream(temporary, { flags: "wx" }),
       );
@@ -146,7 +144,7 @@ export class AttachmentStore {
       const digest = hash.digest("hex");
       const url = await this.storeContent(temporary, digest, extension);
 
-      console.log(`[attachment] ${image.key} -> ${digest}`);
+      console.log(`[image] ${image.key} -> ${digest}`);
       return url;
     } finally {
       await unlink(temporary).catch(() => {});
@@ -164,9 +162,11 @@ export class AttachmentStore {
       return current;
     }
 
-    const task = this.commitContent(temporary, digest, extension).finally(() => {
-      this.pendingContents.delete(digest);
-    });
+    const task = this.commitContent(temporary, digest, extension).finally(
+      () => {
+        this.pendingContents.delete(digest);
+      },
+    );
 
     this.pendingContents.set(digest, task);
     return task;
@@ -203,6 +203,6 @@ export class AttachmentStore {
   }
 
   private publicUrl(filename: string): string {
-    return new URL(`/attachments/${filename}`, this.publicBaseUrl).toString();
+    return new URL(`/images/${filename}`, this.publicBaseUrl).toString();
   }
 }

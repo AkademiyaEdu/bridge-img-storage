@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { config } from "./config.js";
 import { AvatarDB } from "./db.js";
 import { AvatarStore } from "./avatar.js";
-import { AttachmentStore } from "./attachment.js";
+import { ImageStore } from "./image.js";
 import { createStorageServer } from "./server.js";
 
 await Promise.all([
@@ -13,22 +13,19 @@ await Promise.all([
 
 const db = new AvatarDB(config.dbPath);
 const avatars = new AvatarStore(config.avatarDir, db);
-const attachments = new AttachmentStore(
-  config.imageDir,
-  config.publicBaseUrl,
-);
-const server = createStorageServer(attachments, config.apiToken);
+const images = new ImageStore(config.imageDir, config.publicBaseUrl);
+const server = createStorageServer(images, config.apiToken);
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
 
 function update(user: Parameters<AvatarStore["save"]>[0]): void {
-  void avatars.save(user).catch(error => {
+  void avatars.save(user).catch((error) => {
     console.error(`[avatar] ${user.id}:`, error);
   });
 }
 
-client.on(Events.MessageCreate, msg => {
+client.on(Events.MessageCreate, (msg) => {
   if (
     !msg.author.bot &&
     (!config.channelId || msg.channelId === config.channelId)
@@ -43,7 +40,7 @@ client.on(Events.UserUpdate, (_before, after) => {
   }
 });
 
-client.once(Events.ClientReady, ready => {
+client.once(Events.ClientReady, (ready) => {
   console.log(`[discord] ${ready.user.tag}`);
 });
 

@@ -4,7 +4,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import type { AttachmentStore } from "./attachment.js";
+import type { ImageStore } from "./image.js";
 
 const MAX_BODY_SIZE = 64 * 1024;
 
@@ -12,9 +12,7 @@ function authorized(req: IncomingMessage, token: string): boolean {
   const actual = Buffer.from(req.headers.authorization ?? "");
   const expected = Buffer.from(`Bearer ${token}`);
 
-  return (
-    actual.length === expected.length && timingSafeEqual(actual, expected)
-  );
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -59,10 +57,7 @@ function send(
   res.end(body);
 }
 
-export function createStorageServer(
-  attachments: AttachmentStore,
-  apiToken: string,
-) {
+export function createStorageServer(images: ImageStore, apiToken: string) {
   return createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/healthz") {
       send(res, 204);
@@ -91,7 +86,7 @@ export function createStorageServer(
     }
 
     try {
-      const urls = await attachments.save(body);
+      const urls = await images.save(body);
 
       send(res, 200, JSON.stringify(urls), {
         "content-type": "application/json; charset=utf-8",

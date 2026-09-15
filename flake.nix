@@ -67,9 +67,8 @@
         });
 
       devShells = forAllSystems (pkgs: {
-        default = with pkgs; mkShell {
-          packages = [ nodejs_26 pnpm_10 git jq ];
-        };
+        default = with pkgs;
+          mkShell { packages = [ nodejs_26 pnpm_10 git jq ]; };
       });
     };
 }
