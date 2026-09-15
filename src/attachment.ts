@@ -17,19 +17,8 @@ const EXTENSION_BY_CONTENT_TYPE = new Map([
 
 const IMAGE_EXTENSIONS = [...new Set(EXTENSION_BY_CONTENT_TYPE.values())];
 
-export interface DiscordAttachment {
-  id: string;
-  url: string;
-}
-
-export interface QQAttachment {
-  id: string;
-  url: string;
-}
-
-type ValidatedAttachment = {
+type ValidatedImage = {
   key: string;
-  id: string;
   source: URL;
   sourceName: "Discord" | "QQ";
 };
@@ -43,110 +32,84 @@ export class AttachmentStore {
     private readonly publicBaseUrl: string,
   ) {}
 
-  saveDiscord(attachments: readonly DiscordAttachment[]): Promise<string[]> {
-    return this.save(
-      attachments.map((attachment) => ({
-        key: `discord:${attachment.id}`,
-        id: attachment.id,
-        source: this.validateDiscordSource(attachment),
-        sourceName: "Discord" as const,
-      })),
-    );
+  save(urls: readonly string[]): Promise<string[]> {
+    const images = urls.map((url) => this.validateSource(url));
+
+    return Promise.all(images.map((image) => this.saveOne(image)));
   }
 
-  saveQQ(attachments: readonly QQAttachment[]): Promise<string[]> {
-    return this.save(
-      attachments.map((attachment) => ({
-        key: `qq:${attachment.id}`,
-        id: attachment.id,
-        source: this.validateQQSource(attachment),
-        sourceName: "QQ" as const,
-      })),
-    );
-  }
-
-  private save(attachments: readonly ValidatedAttachment[]): Promise<string[]> {
-    return Promise.all(
-      attachments.map((attachment) => this.saveOne(attachment)),
-    );
-  }
-
-  private saveOne(attachment: ValidatedAttachment): Promise<string> {
-    const current = this.pendingSources.get(attachment.key);
+  private saveOne(image: ValidatedImage): Promise<string> {
+    const current = this.pendingSources.get(image.key);
 
     if (current) {
       return current;
     }
 
-    const task = this.store(attachment).finally(() => {
-      this.pendingSources.delete(attachment.key);
+    const task = this.store(image).finally(() => {
+      this.pendingSources.delete(image.key);
     });
 
-    this.pendingSources.set(attachment.key, task);
+    this.pendingSources.set(image.key, task);
     return task;
   }
 
-  private validateDiscordSource(attachment: DiscordAttachment): URL {
-    if (!/^\d+$/.test(attachment.id)) {
-      throw new Error("Invalid Discord attachment id");
-    }
-
-    const source = new URL(attachment.url);
+  private validateSource(url: string): ValidatedImage {
+    const source = new URL(url);
 
     if (
-      source.protocol !== "https:" ||
-      source.hostname !== "cdn.discordapp.com"
+      source.protocol === "https:" &&
+      source.hostname === "cdn.discordapp.com"
     ) {
-      throw new Error("Unsupported Discord attachment URL");
+      const match = source.pathname.match(
+        /^\/attachments\/\d+\/(\d+)\/[^/]+$/,
+      );
+
+      if (!match) {
+        throw new Error("Unsupported Discord attachment URL");
+      }
+
+      return {
+        key: `discord:${match[1]}`,
+        source,
+        sourceName: "Discord",
+      };
     }
-
-    const match = source.pathname.match(
-      /^\/attachments\/\d+\/(\d+)\/[^/]+$/,
-    );
-
-    if (!match || match[1] !== attachment.id) {
-      throw new Error("Discord attachment id does not match URL");
-    }
-
-    return source;
-  }
-
-  private validateQQSource(attachment: QQAttachment): URL {
-    if (!attachment.id) {
-      throw new Error("Invalid QQ attachment id");
-    }
-
-    const source = new URL(attachment.url);
 
     if (
-      source.protocol !== "https:" ||
-      source.hostname !== "multimedia.nt.qq.com.cn" ||
-      source.pathname !== "/download"
+      source.protocol === "https:" &&
+      source.hostname === "multimedia.nt.qq.com.cn" &&
+      source.pathname === "/download"
     ) {
-      throw new Error("Unsupported QQ attachment URL");
+      const fileid = source.searchParams.get("fileid");
+
+      if (!fileid) {
+        throw new Error("QQ attachment URL is missing fileid");
+      }
+
+      return {
+        key: `qq:${fileid}`,
+        source,
+        sourceName: "QQ",
+      };
     }
 
-    if (source.searchParams.get("fileid") !== attachment.id) {
-      throw new Error("QQ attachment id does not match URL");
-    }
-
-    return source;
+    throw new Error("Unsupported image URL");
   }
 
-  private async store(attachment: ValidatedAttachment): Promise<string> {
-    const response = await fetch(attachment.source, {
+  private async store(image: ValidatedImage): Promise<string> {
+    const response = await fetch(image.source, {
       redirect: "error",
       signal: AbortSignal.timeout(60_000),
     });
 
     if (!response.ok) {
       throw new Error(
-        `${attachment.sourceName} attachment download failed: HTTP ${response.status}`,
+        `${image.sourceName} attachment download failed: HTTP ${response.status}`,
       );
     }
 
     if (!response.body) {
-      throw new Error(`${attachment.sourceName} attachment response is empty`);
+      throw new Error(`${image.sourceName} attachment response is empty`);
     }
 
     const contentType = response.headers
@@ -183,9 +146,7 @@ export class AttachmentStore {
       const digest = hash.digest("hex");
       const url = await this.storeContent(temporary, digest, extension);
 
-      console.log(
-        `[attachment] ${attachment.sourceName} ${attachment.id} -> ${digest}`,
-      );
+      console.log(`[attachment] ${image.key} -> ${digest}`);
       return url;
     } finally {
       await unlink(temporary).catch(() => {});
