@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { AttachmentStore } from "../src/attachment.js";
 
-test("Discord and QQ attachments share SHA-256 storage", async () => {
+test("Discord and QQ image URLs share SHA-256 storage", async () => {
   const dir = await mkdtemp(join(tmpdir(), "attachment-store-"));
   const store = new AttachmentStore(dir, "https://img.example.com");
   const originalFetch = globalThis.fetch;
@@ -27,14 +27,10 @@ test("Discord and QQ attachments share SHA-256 storage", async () => {
   };
 
   try {
-    const [discordResult, qqResult] = await Promise.all([
-      store.saveDiscord([{ id: "456", url: discordURL }]),
-      store.saveQQ([{ id: "qq-file-id", url: qqURL }]),
-    ]);
+    const result = await store.save([discordURL, qqURL]);
 
     const expected = `https://img.example.com/attachments/${digest}.png`;
-    assert.deepEqual(discordResult, [expected]);
-    assert.deepEqual(qqResult, [expected]);
+    assert.deepEqual(result, [expected, expected]);
     assert.deepEqual(await readdir(dir), [`${digest}.png`]);
   } finally {
     globalThis.fetch = originalFetch;
@@ -42,17 +38,23 @@ test("Discord and QQ attachments share SHA-256 storage", async () => {
   }
 });
 
-test("rejects mismatched QQ fileid", async () => {
+test("rejects unsupported image URLs", () => {
+  const store = new AttachmentStore("/tmp/unused", "https://img.example.com");
+
+  assert.throws(
+    () => store.save(["https://example.com/image.png"]),
+    /Unsupported image URL/,
+  );
+});
+
+test("rejects QQ URLs without fileid", () => {
   const store = new AttachmentStore("/tmp/unused", "https://img.example.com");
 
   assert.throws(
     () =>
-      store.saveQQ([
-        {
-          id: "expected",
-          url: "https://multimedia.nt.qq.com.cn/download?fileid=other&rkey=test",
-        },
+      store.save([
+        "https://multimedia.nt.qq.com.cn/download?appid=1407&rkey=test",
       ]),
-    /QQ attachment id does not match URL/,
+    /missing fileid/,
   );
 });
