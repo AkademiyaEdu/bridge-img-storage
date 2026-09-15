@@ -2,7 +2,7 @@
 
 QQ/Discord 桥的独立图片存储进程。目前负责监听 Discord 用户头像，以及保存 Discord / QQ 两侧需要长期公网访问的图片。
 
-Discord attachment 和 QQ 图片共用 `IMAGE_DIR`。下载完成后按内容计算 SHA-256，并保存为 `{sha256}.{ext}`，因此两侧字节完全相同的图片只会存一份。
+Discord 和 QQ 图片共用 `IMAGE_DIR`。下载完成后按内容计算 SHA-256，并保存为 `{sha256}.{ext}`，因此两侧字节完全相同的图片只会存一份。
 
 ## Nix package
 
@@ -54,7 +54,7 @@ DISCORD_CHANNEL_ID=需要监听头像的频道ID
 DB_PATH=./data/img.db
 AVATAR_DIR=./data/avatars
 IMAGE_DIR=./data/images
-PUBLIC_BASE_URL=https://discord.nahida.im
+PUBLIC_BASE_URL=https://brg-img.example.com
 STORAGE_API_TOKEN=与主桥共享的随机Token
 HTTP_HOST=127.0.0.1
 HTTP_PORT=8787
@@ -83,25 +83,25 @@ Content-Type: application/json
 ]
 ```
 
-请求体是图片临时 URL 数组，不需要额外传 attachment ID 或 QQ fileid。本进程会从 URL 本身解析来源标识，并立即并发下载。
+请求体是图片临时 URL 数组，不需要额外传资源 ID。本进程会从 URL 本身解析来源标识，并立即并发下载。
 
 目前只接受两类来源：
 
 - `https://cdn.discordapp.com/attachments/...`
 - `https://multimedia.nt.qq.com.cn/download?...&fileid=...`
 
-其他 URL 会被拒绝。Discord URL 会解析路径中的 attachment ID，QQ URL 会解析查询参数中的 `fileid`，两者只用于下载期间的并发去重；永久文件名始终由下载内容的 SHA-256 决定。
+其他 URL 会被拒绝。Discord URL 会解析路径中的资源 ID，QQ URL 会解析查询参数中的 `fileid`；两者只用于下载期间的并发去重，永久文件名始终由下载内容的 SHA-256 决定。
 
 接口按请求顺序返回永久 URL：
 
 ```json
 [
-  "https://discord.nahida.im/attachments/3c9f...f12a.png",
-  "https://discord.nahida.im/attachments/7d2a...91be.webp"
+  "https://brg-img.example.com/images/3c9f...f12a.png",
+  "https://brg-img.example.com/images/7d2a...91be.webp"
 ]
 ```
 
-Discord 和 QQ 共用同一个目录及命名空间，因此相同内容会自动去重；并发写入同一内容也会合并到同一个最终文件。所有图片都通过 `/attachments/` 暴露。
+Discord 和 QQ 共用同一个目录及命名空间，因此相同内容会自动去重；并发写入同一内容也会合并到同一个最终文件。所有图片都通过 `/images/` 暴露。
 
 `GET /healthz` 不需要鉴权。写接口使用 Bearer Token；公网部署时应由 Nginx/Caddy 提供 HTTPS，Node 继续监听 `127.0.0.1`。
 
@@ -115,7 +115,7 @@ location /avatars/ {
     add_header Cache-Control "public, max-age=60, must-revalidate";
 }
 
-location /attachments/ {
+location /images/ {
     alias /mnt/gdrive/bridge-img-storage/images/;
     add_header Cache-Control "public, max-age=31536000, immutable";
 }
