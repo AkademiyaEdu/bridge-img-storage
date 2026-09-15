@@ -4,3 +4,4 @@ data/
 .env
 .cache/
 *.log
+/.direnv
