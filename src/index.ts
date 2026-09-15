@@ -8,13 +8,13 @@ import { createStorageServer } from "./server.js";
 
 await Promise.all([
   mkdir(config.avatarDir, { recursive: true }),
-  mkdir(config.attachmentDir, { recursive: true }),
+  mkdir(config.imageDir, { recursive: true }),
 ]);
 
 const db = new AvatarDB(config.dbPath);
 const avatars = new AvatarStore(config.avatarDir, db);
 const attachments = new AttachmentStore(
-  config.attachmentDir,
+  config.imageDir,
   config.publicBaseUrl,
 );
 const server = createStorageServer(attachments, config.apiToken);
