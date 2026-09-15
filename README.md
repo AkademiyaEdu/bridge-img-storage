@@ -2,7 +2,7 @@
 
 QQ/Discord 桥的独立图片存储进程。目前负责监听 Discord 用户头像，以及保存 Discord / QQ 两侧需要长期公网访问的图片。
 
-Discord attachment 和 QQ 图片共用 `ATTACHMENT_DIR`。下载完成后按内容计算 SHA-256，并保存为 `{sha256}.{ext}`，因此两侧字节完全相同的图片只会存一份。
+Discord attachment 和 QQ 图片共用 `IMAGE_DIR`。下载完成后按内容计算 SHA-256，并保存为 `{sha256}.{ext}`，因此两侧字节完全相同的图片只会存一份。
 
 ## Nix package
 
@@ -53,14 +53,14 @@ DISCORD_BOT_TOKEN=你的BotToken
 DISCORD_CHANNEL_ID=需要监听头像的频道ID
 DB_PATH=./data/img.db
 AVATAR_DIR=./data/avatars
-ATTACHMENT_DIR=./data/attachments
+IMAGE_DIR=./data/images
 PUBLIC_BASE_URL=https://discord.nahida.im
 STORAGE_API_TOKEN=与主桥共享的随机Token
 HTTP_HOST=127.0.0.1
 HTTP_PORT=8787
 ```
 
-`DISCORD_CHANNEL_ID` 留空时会监听 Bot 可见的所有服务器频道消息。`PUBLIC_BASE_URL` 是静态图片的公网域名。SQLite 默认使用 `./data/img.db`。如果使用 rclone mount / VFS，把 `ATTACHMENT_DIR` 指向挂载目录即可；SQLite 和头像目录仍建议保留在本地磁盘。
+`DISCORD_CHANNEL_ID` 留空时会监听 Bot 可见的所有服务器频道消息。`PUBLIC_BASE_URL` 是静态图片的公网域名。SQLite 默认使用 `./data/img.db`。如果使用 rclone mount / VFS，把 `IMAGE_DIR` 指向挂载目录即可；SQLite 和头像目录仍建议保留在本地磁盘。
 
 ```bash
 pnpm typecheck
@@ -116,7 +116,7 @@ location /avatars/ {
 }
 
 location /attachments/ {
-    alias /mnt/gdrive/bridge-img-storage/attachments/;
+    alias /mnt/gdrive/bridge-img-storage/images/;
     add_header Cache-Control "public, max-age=31536000, immutable";
 }
 ```
