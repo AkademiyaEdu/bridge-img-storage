@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { access, mkdir, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -16,6 +17,14 @@ const EXTENSION_BY_CONTENT_TYPE = new Map([
 ]);
 
 const IMAGE_EXTENSIONS = [...new Set(EXTENSION_BY_CONTENT_TYPE.values())];
+
+function formatMiB(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+}
+
+function formatMs(ms: number): string {
+  return `${ms.toFixed(0)} ms`;
+}
 
 type ValidatedImage = {
   key: string;
@@ -95,10 +104,14 @@ export class ImageStore {
   }
 
   private async store(image: ValidatedImage): Promise<string> {
+    const startedAt = performance.now();
+    console.log(`[image] ${image.key} download start`);
+
     const response = await fetch(image.source, {
       redirect: "error",
       signal: AbortSignal.timeout(60_000),
     });
+    const headersAt = performance.now();
 
     if (!response.ok) {
       throw new Error(
@@ -123,13 +136,20 @@ export class ImageStore {
       throw new Error(`Unsupported image type: ${contentType ?? "unknown"}`);
     }
 
+    const contentLengthHeader = response.headers.get("content-length");
+    const contentLength = contentLengthHeader
+      ? Number(contentLengthHeader)
+      : undefined;
+
     await mkdir(this.dir, { recursive: true });
 
     const temporary = join(this.dir, `${randomUUID()}.tmp`);
     const hash = createHash("sha256");
+    let bytes = 0;
     const hasher = new Transform({
       transform(chunk, _encoding, callback) {
         hash.update(chunk);
+        bytes += chunk.length;
         callback(null, chunk);
       },
     });
@@ -140,11 +160,28 @@ export class ImageStore {
         hasher,
         createWriteStream(temporary, { flags: "wx" }),
       );
+      const downloadedAt = performance.now();
 
       const digest = hash.digest("hex");
       const url = await this.storeContent(temporary, digest, extension);
+      const storedAt = performance.now();
 
-      console.log(`[image] ${image.key} -> ${digest}`);
+      const downloadMs = downloadedAt - headersAt;
+      const speedMiBs =
+        downloadMs > 0 ? bytes / 1024 / 1024 / (downloadMs / 1000) : 0;
+      const expectedSize =
+        contentLength !== undefined && Number.isFinite(contentLength)
+          ? ` (content-length=${formatMiB(contentLength)})`
+          : "";
+
+      console.log(
+        `[image] ${image.key} -> ${digest}` +
+          ` | size=${formatMiB(bytes)}${expectedSize}` +
+          ` | headers=${formatMs(headersAt - startedAt)}` +
+          ` | download=${formatMs(downloadMs)} @ ${speedMiBs.toFixed(2)} MiB/s` +
+          ` | store=${formatMs(storedAt - downloadedAt)}` +
+          ` | total=${formatMs(storedAt - startedAt)}`,
+      );
       return url;
     } finally {
       await unlink(temporary).catch(() => {});
